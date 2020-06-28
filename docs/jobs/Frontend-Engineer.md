@@ -23,6 +23,7 @@ Hi there! We're looking for a Frontend Software Engineer to join the team.
 ## Preferred Qualifications:
 
 - Remote work experience
+- React, Next.js, and Typescript experience
 - Experience with OAuth2, OIDC, SAML, and other IAM technologies
 - Familiarity with Kubernetes, Helm, and other Cloud Native applications
 
@@ -34,3 +35,8 @@ Pomerium helps companies manage and secure internal access. We
 - are a fully remote team. While prior experience working remotely isn't required, we are looking for team members who perform well given a high level of independence and autonomy.
 - offer competitive salaries
 - are committed to building a team that represents a variety of backgrounds, perspectives, and skills. We believe the more inclusive we are, the better our company will be
+
+
+## How to apply
+
+Send your resume and some example work to jobs+frontend@pomerium.io
