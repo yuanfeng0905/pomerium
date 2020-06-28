@@ -1,7 +1,5 @@
 # Frontend Engineer
 
-Job Posted: May 12, 2020 10:04 AM Languages: Javascript, React Location: Remote US/CA
-
 Hi there! We're looking for a Frontend Software Engineer to join the team.
 
 ## Responsibilities:
@@ -40,3 +38,6 @@ Pomerium helps companies manage and secure internal access. We
 ## How to apply
 
 Send your resume and some example work to jobs+frontend@pomerium.io
+
+Languages: Javascript, React, Typescript
+Location: Remote US/CA
