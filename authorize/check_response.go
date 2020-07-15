@@ -128,9 +128,7 @@ func (a *Authorize) plainTextDeniedResponse(code int32, reason string, headers m
 }
 
 func (a *Authorize) redirectResponse(in *envoy_service_auth_v2.CheckRequest) *envoy_service_auth_v2.CheckResponse {
-	opts := a.currentOptions.Load()
-
-	signinURL := opts.GetAuthenticateURL().ResolveReference(&url.URL{Path: "/.pomerium/sign_in"})
+	signinURL := a.options.GetAuthenticateURL().ResolveReference(&url.URL{Path: "/.pomerium/sign_in"})
 	q := signinURL.Query()
 
 	// always assume https scheme
@@ -139,7 +137,7 @@ func (a *Authorize) redirectResponse(in *envoy_service_auth_v2.CheckRequest) *en
 
 	q.Set(urlutil.QueryRedirectURI, url.String())
 	signinURL.RawQuery = q.Encode()
-	redirectTo := urlutil.NewSignedURL(opts.SharedKey, signinURL).String()
+	redirectTo := urlutil.NewSignedURL(a.options.SharedKey, signinURL).String()
 
 	return a.deniedResponse(in, http.StatusFound, "Login", map[string]string{
 		"Location": redirectTo,

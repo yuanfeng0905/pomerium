@@ -19,7 +19,7 @@ import (
 	"github.com/pomerium/pomerium/internal/urlutil"
 )
 
-func (srv *Server) buildClusters(options *config.Options) []*envoy_config_cluster_v3.Cluster {
+func (srv *Server) buildClusters(options *config.Options, policies []config.Policy) []*envoy_config_cluster_v3.Cluster {
 	grpcURL := &url.URL{
 		Scheme: "http",
 		Host:   srv.GRPCListener.Addr().String(),
@@ -41,7 +41,7 @@ func (srv *Server) buildClusters(options *config.Options) []*envoy_config_cluste
 	clusters = append(clusters, buildInternalCluster(options, "pomerium-authz", authzURL, true))
 
 	if config.IsProxy(options.Services) {
-		for _, policy := range options.Policies {
+		for _, policy := range policies {
 			clusters = append(clusters, buildPolicyCluster(&policy))
 		}
 	}

@@ -98,11 +98,11 @@ func buildControlPlanePrefixRoute(prefix string) *envoy_config_route_v3.Route {
 	}
 }
 
-func buildPolicyRoutes(options *config.Options, domain string) []*envoy_config_route_v3.Route {
+func buildPolicyRoutes(options *config.Options, policies []config.Policy, domain string) []*envoy_config_route_v3.Route {
 	var routes []*envoy_config_route_v3.Route
 	responseHeadersToAdd := toEnvoyHeaders(options.Headers)
 
-	for i, policy := range options.Policies {
+	for i, policy := range policies {
 		if policy.Source.Host != domain {
 			continue
 		}

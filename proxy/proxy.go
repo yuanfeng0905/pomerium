@@ -85,6 +85,8 @@ type Proxy struct {
 	jwtClaimHeaders []string
 	authzClient     envoy_service_auth_v2.AuthorizationClient
 
+	policyManager *config.PolicyManager
+
 	currentRouter atomic.Value
 }
 
@@ -179,9 +181,6 @@ func (p *Proxy) UpdateOptions(o config.Options) error {
 
 // UpdatePolicies updates the H basedon the configured policies
 func (p *Proxy) UpdatePolicies(opts *config.Options) error {
-	if len(opts.Policies) == 0 {
-		log.Warn().Msg("proxy: configuration has no policies")
-	}
 	r := httputil.NewRouter()
 	r.NotFoundHandler = httputil.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
 		return httputil.NewError(http.StatusNotFound, fmt.Errorf("%s route unknown", r.Host))
@@ -196,12 +195,6 @@ func (p *Proxy) UpdatePolicies(opts *config.Options) error {
 		// if a forward auth endpoint is set, register its handlers
 		h := r.Host(opts.ForwardAuthURL.Hostname()).Subrouter()
 		h.PathPrefix("/").Handler(p.registerFwdAuthHandlers())
-	}
-
-	for _, policy := range opts.Policies {
-		if err := policy.Validate(); err != nil {
-			return fmt.Errorf("proxy: invalid policy %w", err)
-		}
 	}
 
 	p.currentRouter.Store(r)

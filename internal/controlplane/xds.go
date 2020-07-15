@@ -29,10 +29,10 @@ import (
 	"github.com/pomerium/pomerium/internal/log"
 )
 
-func (srv *Server) buildDiscoveryResponse(version string, typeURL string, options *config.Options) (*envoy_service_discovery_v3.DiscoveryResponse, error) {
+func (srv *Server) buildDiscoveryResponse(version string, typeURL string, options *config.Options, policies []config.Policy) (*envoy_service_discovery_v3.DiscoveryResponse, error) {
 	switch typeURL {
 	case "type.googleapis.com/envoy.config.listener.v3.Listener":
-		listeners := buildListeners(options)
+		listeners := buildListeners(options, policies)
 		anys := make([]*any.Any, len(listeners))
 		for i, listener := range listeners {
 			a, err := ptypes.MarshalAny(listener)
@@ -47,7 +47,7 @@ func (srv *Server) buildDiscoveryResponse(version string, typeURL string, option
 			TypeUrl:     typeURL,
 		}, nil
 	case "type.googleapis.com/envoy.config.cluster.v3.Cluster":
-		clusters := srv.buildClusters(options)
+		clusters := srv.buildClusters(options, policies)
 		anys := make([]*any.Any, len(clusters))
 		for i, cluster := range clusters {
 			a, err := ptypes.MarshalAny(cluster)

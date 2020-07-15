@@ -34,11 +34,11 @@ func init() {
 	})
 }
 
-func buildListeners(options *config.Options) []*envoy_config_listener_v3.Listener {
+func buildListeners(options *config.Options, policies []config.Policy) []*envoy_config_listener_v3.Listener {
 	var listeners []*envoy_config_listener_v3.Listener
 
 	if config.IsAuthenticate(options.Services) || config.IsProxy(options.Services) {
-		listeners = append(listeners, buildMainListener(options))
+		listeners = append(listeners, buildMainListener(options, policies))
 	}
 
 	if config.IsAuthorize(options.Services) || config.IsCache(options.Services) {
@@ -48,10 +48,10 @@ func buildListeners(options *config.Options) []*envoy_config_listener_v3.Listene
 	return listeners
 }
 
-func buildMainListener(options *config.Options) *envoy_config_listener_v3.Listener {
+func buildMainListener(options *config.Options, policies []config.Policy) *envoy_config_listener_v3.Listener {
 	if options.InsecureServer {
-		filter := buildMainHTTPConnectionManagerFilter(options,
-			getAllRouteableDomains(options, options.Addr))
+		filter := buildMainHTTPConnectionManagerFilter(options, policies,
+			getAllRouteableDomains(options, policies, options.Addr))
 
 		return &envoy_config_listener_v3.Listener{
 			Name:    "http-ingress",
@@ -74,9 +74,9 @@ func buildMainListener(options *config.Options) *envoy_config_listener_v3.Listen
 				TypedConfig: tlsInspectorCfg,
 			},
 		}},
-		FilterChains: buildFilterChains(options, options.Addr,
+		FilterChains: buildFilterChains(options, policies, options.Addr,
 			func(tlsDomain string, httpDomains []string) *envoy_config_listener_v3.FilterChain {
-				filter := buildMainHTTPConnectionManagerFilter(options, httpDomains)
+				filter := buildMainHTTPConnectionManagerFilter(options, policies, httpDomains)
 				filterChain := &envoy_config_listener_v3.FilterChain{
 					Filters: []*envoy_config_listener_v3.Filter{filter},
 				}
@@ -102,10 +102,10 @@ func buildMainListener(options *config.Options) *envoy_config_listener_v3.Listen
 }
 
 func buildFilterChains(
-	options *config.Options, addr string,
+	options *config.Options, policies []config.Policy, addr string,
 	callback func(tlsDomain string, httpDomains []string) *envoy_config_listener_v3.FilterChain,
 ) []*envoy_config_listener_v3.FilterChain {
-	allDomains := getAllRouteableDomains(options, addr)
+	allDomains := getAllRouteableDomains(options, policies, addr)
 	var chains []*envoy_config_listener_v3.FilterChain
 	for _, domain := range allDomains {
 		// first we match on SNI
@@ -116,7 +116,7 @@ func buildFilterChains(
 	return chains
 }
 
-func buildMainHTTPConnectionManagerFilter(options *config.Options, domains []string) *envoy_config_listener_v3.Filter {
+func buildMainHTTPConnectionManagerFilter(options *config.Options, policies []config.Policy, domains []string) *envoy_config_listener_v3.Filter {
 	var virtualHosts []*envoy_config_route_v3.VirtualHost
 	for _, domain := range domains {
 		vh := &envoy_config_route_v3.VirtualHost{
@@ -137,7 +137,7 @@ func buildMainHTTPConnectionManagerFilter(options *config.Options, domains []str
 
 		// if we're the proxy, add all the policy routes
 		if config.IsProxy(options.Services) {
-			vh.Routes = append(vh.Routes, buildPolicyRoutes(options, domain)...)
+			vh.Routes = append(vh.Routes, buildPolicyRoutes(options, policies, domain)...)
 		}
 
 		if len(vh.Routes) > 0 {
@@ -393,7 +393,7 @@ func buildDownstreamTLSContext(options *config.Options, domain string) *envoy_ex
 	}
 }
 
-func getAllRouteableDomains(options *config.Options, addr string) []string {
+func getAllRouteableDomains(options *config.Options, policies []config.Policy, addr string) []string {
 	lookup := map[string]struct{}{}
 	if config.IsAuthenticate(options.Services) && addr == options.Addr {
 		lookup[options.GetAuthenticateURL().Host] = struct{}{}
@@ -405,7 +405,7 @@ func getAllRouteableDomains(options *config.Options, addr string) []string {
 		lookup[options.GetDataBrokerURL().Host] = struct{}{}
 	}
 	if config.IsProxy(options.Services) && addr == options.Addr {
-		for _, policy := range options.Policies {
+		for _, policy := range policies {
 			lookup[policy.Source.Host] = struct{}{}
 		}
 		if options.ForwardAuthURL != nil {

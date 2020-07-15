@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/golang/protobuf/ptypes"
 	"google.golang.org/grpc"
 	"gopkg.in/tomb.v2"
 
@@ -15,10 +16,12 @@ import (
 	"github.com/pomerium/pomerium/internal/directory"
 	"github.com/pomerium/pomerium/internal/identity"
 	"github.com/pomerium/pomerium/internal/identity/manager"
+	"github.com/pomerium/pomerium/internal/log"
 	"github.com/pomerium/pomerium/internal/telemetry"
 	"github.com/pomerium/pomerium/internal/urlutil"
 	"github.com/pomerium/pomerium/pkg/cryptutil"
 	"github.com/pomerium/pomerium/pkg/grpc/databroker"
+	"github.com/pomerium/pomerium/pkg/grpc/policy"
 	"github.com/pomerium/pomerium/pkg/grpc/session"
 	"github.com/pomerium/pomerium/pkg/grpc/user"
 )
@@ -80,7 +83,7 @@ func New(opts config.Options) (*Cache, error) {
 
 	manager := manager.New(authenticator, directoryProvider, sessionClient, userClient, dataBrokerClient)
 
-	return &Cache{
+	c := &Cache{
 		dataBrokerServer: dataBrokerServer,
 		sessionServer:    sessionServer,
 		userServer:       userServer,
@@ -90,7 +93,9 @@ func New(opts config.Options) (*Cache, error) {
 		localGRPCServer:              localGRPCServer,
 		localGRPCConnection:          localGRPCConnection,
 		deprecatedCacheClusterDomain: opts.GetDataBrokerURL().Hostname(),
-	}, nil
+	}
+	c.setConfigFilePolicies(&opts)
+	return c, nil
 }
 
 // Register registers all the gRPC services with the given server.
@@ -118,6 +123,44 @@ func (c *Cache) Run(ctx context.Context) error {
 		return c.manager.Run(ctx)
 	})
 	return t.Wait()
+}
+
+// UpdateOptions implements the OptionsUpdater interface and updates internal
+// structures based on config.Options
+func (c *Cache) UpdateOptions(opts config.Options) error {
+	if c == nil {
+		return nil
+	}
+
+	log.Info().Str("checksum", fmt.Sprintf("%x", opts.Checksum())).Msg("cache: updating options")
+	c.setConfigFilePolicies(&opts)
+
+	return nil
+}
+
+func (c *Cache) setConfigFilePolicies(opts *config.Options) {
+	cfg := &policy.PolicyConfig{
+		Name: "config-file",
+	}
+	for _, p := range opts.Policies {
+		cfg.Routes = append(cfg.Routes, p.ToProto())
+	}
+
+	any, err := ptypes.MarshalAny(cfg)
+	if err != nil {
+		log.Error().Err(err).Msg("error marshaling any type")
+		return
+	}
+
+	_, err = c.dataBrokerServer.Set(context.Background(), &databroker.SetRequest{
+		Type: any.GetTypeUrl(),
+		Id:   "config-file",
+		Data: any,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("error saving policies")
+		return
+	}
 }
 
 // validate checks that proper configuration settings are set to create

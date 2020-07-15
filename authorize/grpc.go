@@ -41,10 +41,13 @@ func (a *Authorize) Check(ctx context.Context, in *envoy_service_auth_v2.CheckRe
 	ctx, span := trace.StartSpan(ctx, "authorize.grpc.Check")
 	defer span.End()
 
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
 	// maybe rewrite http request for forward auth
 	isForwardAuth := a.handleForwardAuth(in)
 	hreq := getHTTPRequestFromCheckRequest(in)
-	rawJWT, _ := loadRawSession(hreq, a.currentOptions.Load(), a.currentEncoder.Load())
+	rawJWT, _ := loadRawSession(hreq, a.options, a.currentEncoder.Load())
 	sessionState, _ := loadSession(a.currentEncoder.Load(), rawJWT)
 
 	// only accept sessions whose databroker server versions match
@@ -69,7 +72,11 @@ func (a *Authorize) Check(ctx context.Context, in *envoy_service_auth_v2.CheckRe
 	defer a.dataBrokerDataLock.RUnlock()
 
 	req := a.getEvaluatorRequestFromCheckRequest(in, sessionState)
-	reply, err := a.pe.Evaluate(ctx, req)
+	a.mu.RLock()
+	pe := a.pe
+	a.mu.RUnlock()
+
+	reply, err := pe.Evaluate(ctx, req)
 	if err != nil {
 		log.Error().Err(err).Msg("error during OPA evaluation")
 		return nil, err
@@ -168,7 +175,7 @@ func (a *Authorize) forceSyncUser(ctx context.Context, userID string) *user.User
 func (a *Authorize) getEnvoyRequestHeaders(signedJWT string) ([]*envoy_api_v2_core.HeaderValueOption, error) {
 	var hvos []*envoy_api_v2_core.HeaderValueOption
 
-	hdrs, err := a.getJWTClaimHeaders(a.currentOptions.Load(), signedJWT)
+	hdrs, err := a.getJWTClaimHeaders(a.options, signedJWT)
 	if err != nil {
 		return nil, err
 	}
@@ -180,14 +187,12 @@ func (a *Authorize) getEnvoyRequestHeaders(signedJWT string) ([]*envoy_api_v2_co
 }
 
 func (a *Authorize) handleForwardAuth(req *envoy_service_auth_v2.CheckRequest) bool {
-	opts := a.currentOptions.Load()
-
-	if opts.ForwardAuthURL == nil {
+	if a.options.ForwardAuthURL == nil {
 		return false
 	}
 
 	checkURL := getCheckRequestURL(req)
-	if urlutil.StripPort(checkURL.Host) != urlutil.StripPort(opts.GetForwardAuthURL().Host) {
+	if urlutil.StripPort(checkURL.Host) != urlutil.StripPort(a.options.GetForwardAuthURL().Host) {
 		return false
 	}
 

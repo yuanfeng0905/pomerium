@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -16,11 +17,13 @@ import (
 	"github.com/pomerium/pomerium/internal/log"
 	"github.com/pomerium/pomerium/internal/telemetry"
 	"github.com/pomerium/pomerium/internal/telemetry/requestid"
+	"github.com/pomerium/pomerium/pkg/grpc/databroker"
 )
 
 type versionedOptions struct {
-	config.Options
-	version int64
+	options  config.Options
+	policies []config.Policy
+	version  int64
 }
 
 type atomicVersionedOptions struct {
@@ -42,6 +45,8 @@ type Server struct {
 	HTTPListener net.Listener
 	HTTPRouter   *mux.Router
 
+	policyManager *config.PolicyManager
+
 	currentConfig atomicVersionedOptions
 	configUpdated chan struct{}
 }
@@ -53,7 +58,24 @@ func NewServer(name string) (*Server, error) {
 	}
 	srv.currentConfig.Store(versionedOptions{})
 
-	var err error
+	dataBrokerConn, err := grpc.NewGRPCClientConn(
+		&grpc.Options{
+			Addr:                    opts.DataBrokerURL,
+			OverrideCertificateName: opts.OverrideCertificateName,
+			CA:                      opts.CA,
+			CAFile:                  opts.CAFile,
+			RequestTimeout:          opts.GRPCClientTimeout,
+			ClientDNSRoundRobin:     opts.GRPCClientDNSRoundRobin,
+			WithInsecure:            opts.GRPCInsecure,
+			ServiceName:             opts.Services,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("proxy: error creating data broker connection: %w", err)
+	}
+	dataBrokerClient := databroker.NewDataBrokerServiceClient(dataBrokerConn)
+	srv.policyManager = config.NewPolicyManager(dataBrokerClient, func(policies []config.Policy) {
+		srv.UpdatePolicies(policies)
+	})
 
 	// setup gRPC
 	srv.GRPCListener, err = net.Listen("tcp4", "127.0.0.1:0")
@@ -84,6 +106,11 @@ func NewServer(name string) (*Server, error) {
 // Run runs the control-plane gRPC and HTTP servers.
 func (srv *Server) Run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
+
+	// start the policy manager
+	eg.Go(func() error {
+		return srv.policyManager.Run(ctx)
+	})
 
 	// start the gRPC server
 	eg.Go(func() error {
@@ -149,9 +176,25 @@ func (srv *Server) UpdateOptions(options config.Options) error {
 	}
 	prev := srv.currentConfig.Load()
 	srv.currentConfig.Store(versionedOptions{
-		Options: options,
-		version: prev.version + 1,
+		options:  options,
+		policies: prev.policies,
+		version:  prev.version + 1,
 	})
 	srv.configUpdated <- struct{}{}
 	return nil
+}
+
+// UpdatePolicies updates the policies.
+func (srv *Server) UpdatePolicies(policies []config.Policy) {
+	select {
+	case <-srv.configUpdated:
+	default:
+	}
+	prev := srv.currentConfig.Load()
+	srv.currentConfig.Store(versionedOptions{
+		options:  prev.options,
+		policies: policies,
+		version:  prev.version + 1,
+	})
+	srv.configUpdated <- struct{}{}
 }

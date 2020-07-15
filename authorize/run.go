@@ -33,6 +33,10 @@ func (a *Authorize) Run(ctx context.Context) error {
 		return a.runDataUpdater(ctx, updateRecord)
 	})
 
+	eg.Go(func() error {
+		return a.policyManager.Run(ctx)
+	})
+
 	return eg.Wait()
 }
 

@@ -23,18 +23,6 @@ import (
 	"github.com/pomerium/pomerium/pkg/grpc/databroker"
 )
 
-type atomicOptions struct {
-	value atomic.Value
-}
-
-func (a *atomicOptions) Load() config.Options {
-	return a.value.Load().(config.Options)
-}
-
-func (a *atomicOptions) Store(options config.Options) {
-	a.value.Store(options)
-}
-
 type atomicMarshalUnmarshaler struct {
 	value atomic.Value
 }
@@ -49,9 +37,11 @@ func (a *atomicMarshalUnmarshaler) Store(encoder encoding.MarshalUnmarshaler) {
 
 // Authorize struct holds
 type Authorize struct {
-	pe *evaluator.Evaluator
+	mu       sync.RWMutex
+	pe       *evaluator.Evaluator
+	options  *config.Options
+	policies []config.Policy
 
-	currentOptions atomicOptions
 	currentEncoder atomicMarshalUnmarshaler
 	templates      *template.Template
 
@@ -60,6 +50,8 @@ type Authorize struct {
 	dataBrokerDataLock             sync.RWMutex
 	dataBrokerData                 evaluator.DataBrokerData
 	dataBrokerSessionServerVersion string
+
+	policyManager *config.PolicyManager
 }
 
 // New validates and creates a new Authorize service from a set of config options.
@@ -84,10 +76,19 @@ func New(opts config.Options) (*Authorize, error) {
 	}
 
 	a := Authorize{
+		options: &opts,
+
 		templates:        template.Must(frontend.NewTemplates()),
 		dataBrokerClient: databroker.NewDataBrokerServiceClient(dataBrokerConn),
 		dataBrokerData:   make(evaluator.DataBrokerData),
 	}
+	a.policyManager = config.NewPolicyManager(a.dataBrokerClient, func(policies []config.Policy) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		a.policies = policies
+		a.update()
+	})
 
 	var host string
 	if opts.AuthenticateURL != nil {
@@ -99,11 +100,8 @@ func New(opts config.Options) (*Authorize, error) {
 	}
 	a.currentEncoder.Store(encoder)
 
-	a.currentOptions.Store(config.Options{})
-	err = a.UpdateOptions(opts)
-	if err != nil {
-		return nil, err
-	}
+	a.update()
+
 	return &a, nil
 }
 
@@ -117,17 +115,6 @@ func validateOptions(o config.Options) error {
 	return nil
 }
 
-// newPolicyEvaluator returns an policy evaluator.
-func newPolicyEvaluator(opts *config.Options) (*evaluator.Evaluator, error) {
-	metrics.AddPolicyCountCallback("pomerium-authorize", func() int64 {
-		return int64(len(opts.Policies))
-	})
-	ctx := context.Background()
-	_, span := trace.StartSpan(ctx, "authorize.newPolicyEvaluator")
-	defer span.End()
-	return evaluator.New(opts)
-}
-
 // UpdateOptions implements the OptionsUpdater interface and updates internal
 // structures based on config.Options
 func (a *Authorize) UpdateOptions(opts config.Options) error {
@@ -136,11 +123,32 @@ func (a *Authorize) UpdateOptions(opts config.Options) error {
 	}
 
 	log.Info().Str("checksum", fmt.Sprintf("%x", opts.Checksum())).Msg("authorize: updating options")
-	a.currentOptions.Store(opts)
 
-	var err error
-	if a.pe, err = newPolicyEvaluator(&opts); err != nil {
-		return err
-	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.options = &opts
+	a.update()
+
 	return nil
+}
+
+// update creates a new policy evaluator. The caller should hold the lock.
+func (a *Authorize) update() {
+	var err error
+	a.pe, err = newPolicyEvaluator(a.options, a.policies)
+	if err != nil {
+		log.Error().Str("service", "authorize").Err(err).Msg("failed to create new policy evaluator")
+	}
+}
+
+// newPolicyEvaluator returns an policy evaluator.
+func newPolicyEvaluator(opts *config.Options, policies []config.Policy) (*evaluator.Evaluator, error) {
+	metrics.AddPolicyCountCallback("pomerium-authorize", func() int64 {
+		return int64(len(policies))
+	})
+	ctx := context.Background()
+	_, span := trace.StartSpan(ctx, "authorize.newPolicyEvaluator")
+	defer span.End()
+	return evaluator.New(opts, policies)
 }

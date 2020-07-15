@@ -49,10 +49,10 @@ type Evaluator struct {
 }
 
 // New creates a new Evaluator.
-func New(options *config.Options) (*Evaluator, error) {
+func New(options *config.Options, policies []config.Policy) (*Evaluator, error) {
 	e := &Evaluator{
 		authenticateHost: options.AuthenticateURL.Host,
-		policies:         options.Policies,
+		policies:         policies,
 	}
 	if options.ClientCA != "" {
 		e.clientCA = options.ClientCA
@@ -100,7 +100,7 @@ func New(options *config.Options) (*Evaluator, error) {
 	e.rego = rego.New(
 		rego.Store(inmem.NewFromObject(map[string]interface{}{
 			"admins":         options.Administrators,
-			"route_policies": options.Policies,
+			"route_policies": policies,
 		})),
 		rego.Module("pomerium.authz", string(authzPolicy)),
 		rego.Query("result = data.pomerium.authz"),

@@ -84,7 +84,7 @@ func Run(ctx context.Context, configFile string) error {
 	}
 	var cacheServer *cache.Cache
 	if config.IsCache(opt.Services) {
-		cacheServer, err = setupCache(opt, controlPlane)
+		cacheServer, err = setupCache(opt, controlPlane, &optionsUpdaters)
 		if err != nil {
 			return err
 		}
@@ -171,12 +171,13 @@ func setupAuthorize(opt *config.Options, controlPlane *controlplane.Server, opti
 	return svc, nil
 }
 
-func setupCache(opt *config.Options, controlPlane *controlplane.Server) (*cache.Cache, error) {
+func setupCache(opt *config.Options, controlPlane *controlplane.Server, optionsUpdaters *[]config.OptionsUpdater) (*cache.Cache, error) {
 	svc, err := cache.New(*opt)
 	if err != nil {
 		return nil, fmt.Errorf("error creating config service: %w", err)
 	}
 	svc.Register(controlPlane.GRPCServer)
+	*optionsUpdaters = append(*optionsUpdaters, svc)
 	log.Info().Msg("enabled cache service")
 	return svc, nil
 }
